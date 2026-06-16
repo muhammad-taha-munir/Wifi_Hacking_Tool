@@ -36,18 +36,21 @@ class WifiManager:
         profile.cipher = const.CIPHER_TYPE_CCMP
         profile.key = password
 
-        self.iface.remove_all_network_profiles()
+        # Avoid dropping the user's current connection by removing all profiles.
+        # Adding a new profile and connecting should be enough.
         tmp_profile = self.iface.add_network_profile(profile)
 
         self.iface.connect(tmp_profile)
-        
+
         # Wait for connection
         start_time = time.time()
-        while time.time() - start_time < 5: # 5 seconds timeout per password
+        while time.time() - start_time < 8:  # timeout per password
             if self.iface.status() == const.IFACE_CONNECTED:
                 self.logger.info(f"SUCCESS! Password for {ssid} is: {password}")
                 return True
             time.sleep(0.5)
-        
+
+        # Cleanup: best-effort disconnect; don't wipe all profiles
         self.iface.disconnect()
         return False
+
